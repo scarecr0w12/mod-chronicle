@@ -22,10 +22,12 @@
 #include <array>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <fstream>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <unordered_map>
 #include <vector>
@@ -78,7 +80,8 @@ public:
     // --- Chronicle extension events (CHRONICLE_*) ---
     static std::string Header(std::string const& realmName);
     static std::string ZoneInfo(std::string const& zoneName, uint32 mapId,
-                                uint32 instanceId, std::string const& instanceType);
+                                uint32 instanceId, std::string const& instanceType,
+                                std::string const& runType);
     static std::string CombatantInfo(Player* player);
     static std::string UnitInfo(Unit* unit);
     static std::string UnitEvade(Unit* unit, uint8 evadeReason);
@@ -249,8 +252,29 @@ public:
     std::string GetInstanceToken(uint32 instanceId) const;
 
 private:
+    enum class BackgroundTaskType
+    {
+        Upload,
+        Ping,
+    };
+
+    struct BackgroundTask
+    {
+        BackgroundTaskType type = BackgroundTaskType::Upload;
+        std::string path;
+        std::string url;
+        std::string secret;
+        uint32 instanceId = 0;
+        std::string mapName;
+        std::string realmName;
+        std::string instanceToken;
+        bool requireTls = false;
+        bool verifyTls = true;
+    };
+
     InstanceTracker() = default;
 
+    bool ShouldTrackMap(Map const* map) const;
     CombatLogWriter* GetOrCreateWriter(Map* map);
     void FinalizeWriterForIdleRotation(uint32 instanceId, std::unique_ptr<CombatLogWriter> writer,
                                        std::string instanceToken);
@@ -258,6 +282,14 @@ private:
     void EmitCombatantInfoIfNeeded(CombatLogWriter& writer, Player* player, uint32 instanceId);
     void QueueUploadTask(std::string path, uint32 instanceId, std::string mapName,
                          std::string realmName, std::string instanceToken);
+    void EnqueueUploadTaskLocked(std::string path, std::string url, std::string secret,
+                                 uint32 instanceId, std::string mapName,
+                                 std::string realmName, std::string instanceToken,
+                                 bool requireTls, bool verifyTls);
+    void EnqueuePingTaskLocked(std::string url, std::string secret,
+                               bool requireTls, bool verifyTls);
+    void EnsureTaskWorkerStartedLocked();
+    void RunTaskWorker();
 
     // Generate a 128-bit random hex token (32 chars) for unique instance identity.
     // Uses AzerothCore's rand32() + ByteArrayToHexStr().
@@ -273,8 +305,11 @@ private:
 
     std::mutex _taskMutex;
     std::condition_variable _taskCv;
+    std::deque<BackgroundTask> _taskQueue;
+    std::thread _taskWorker;
     uint32 _activeBackgroundTasks = 0;
     bool _shuttingDown = false;
+    uint64 _nextSnapshotId = 0;
 
     static void UploadAndDelete(std::string path, std::string url, std::string secret,
                                 uint32 instanceId, std::string mapName, std::string realmName,
@@ -286,10 +321,11 @@ private:
     std::string _uploadSecret;
     bool        _requireTls = false;
     bool        _verifyTls = true;
+    bool        _trackDungeonRuns = true;
     uint32      _idleCloseSeconds = 0;
     bool        _rotateOnIdle = false;
-    bool        _uploadSnapshots = true;
-    bool        _snapshotOnEncounterCredit = true;
+    bool        _uploadSnapshots = false;
+    bool        _snapshotOnEncounterCredit = false;
 };
 
 #endif // MOD_CHRONICLE_H

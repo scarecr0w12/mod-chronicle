@@ -68,6 +68,16 @@ Chronicle.RequireTLS = 0
 Chronicle.VerifyTLS = 1
 
 #
+#    Chronicle.TrackDungeonRuns
+#        Description: Control whether Chronicle tracks non-raid dungeon runs.
+#                     Raid logs remain enabled when Chronicle itself is enabled.
+#        Default:     1 - Enabled
+#                     0 - Disabled
+#
+
+Chronicle.TrackDungeonRuns = 1
+
+#
 #    Chronicle.IdleCloseSeconds
 #        Description: Number of seconds without new log lines before Chronicle
 #                     treats the current file as idle.
@@ -93,18 +103,21 @@ Chronicle.RotateOnIdle = 0
 #    Chronicle.UploadSnapshots
 #        Description: Allow Chronicle to upload temporary snapshot copies of an
 #                     active instance log while the instance is still running.
-#        Default:     1 - Enabled
-#                     0 - Disabled
+#                     Snapshot uploads intentionally overlap the final log and
+#                     can duplicate data unless the ingestion endpoint treats
+#                     snapshots separately.
+#        Default:     0 - Disabled
+#                     1 - Enabled
 #
 
-Chronicle.UploadSnapshots = 1
+Chronicle.UploadSnapshots = 0
 
 #
 #    Chronicle.SnapshotOnEncounterCredit
 #        Description: Upload a snapshot when AzerothCore reports encounter
 #                     credit. Requires Chronicle.UploadSnapshots = 1.
-#        Default:     1 - Enabled
-#                     0 - Disabled
+#        Default:     0 - Disabled
+#                     1 - Enabled
 #
 
-Chronicle.SnapshotOnEncounterCredit = 1
+Chronicle.SnapshotOnEncounterCredit = 0

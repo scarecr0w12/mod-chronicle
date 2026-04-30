@@ -178,11 +178,12 @@ Expected fields, in order:
 2. `mapId`
 3. `instanceId`
 4. `instanceType`
+5. `runType`
 
 Example:
 
 ```text
-1777340510851  CHRONICLE_ZONE_INFO,"Zul'Farrak",209,230,"party"
+1777340510851  CHRONICLE_ZONE_INFO,"Zul'Farrak",209,230,"party","NORMAL"
 ```
 
 Notes:
@@ -190,6 +191,7 @@ Notes:
 1. This is one of the most important extension lines.
 2. It gives Chronicle explicit zone, map, and instance ID context even when synthetic detection is incomplete.
 3. The parser lowercases the zone name before storing it.
+4. Preserve the first four fields exactly; `runType` is an appended AzerothCore extension field and currently emits `NORMAL`, `MYTHIC_PLUS`, or `DUNGEON_MASTER`.
 
 ### `CHRONICLE_COMBATANT_INFO`
 

@@ -50,7 +50,7 @@ the standard combat log.
 | Event | Description |
 |-------|-------------|
 | `CHRONICLE_HEADER` | Written once when the log file is created (realm name, build info) |
-| `CHRONICLE_ZONE_INFO` | Instance zone name, map ID, instance ID |
+| `CHRONICLE_ZONE_INFO` | Instance zone name, map ID, instance ID, instance type, and run type (`NORMAL`, `MYTHIC_PLUS`, `DUNGEON_MASTER`) |
 | `CHRONICLE_COMBATANT_INFO` | Player gear, guild, class, race (emitted when a player enters) |
 | `CHRONICLE_UNIT_INFO` | Unit metadata, emitted first time a GUID appears in combat (guid, name, level, flags, owner, max health, affiliation, boss marker) |
 | `CHRONICLE_UNIT_EVADE` | Creature entered evade mode |
@@ -86,6 +86,8 @@ same data the client combat log would show, with full mitigation breakdowns:
 
 **Unit info suffix:** `guid,"name",level,0xflags,ownerGuid,maxHealth,"affiliation",isBoss`
 
+**Zone info suffix:** `"zoneName",mapId,instanceId,"instanceType","runType"`
+
 ## Setup
 
 ### 1. Place the Module
@@ -114,10 +116,11 @@ Configure via environment variables or `mod_chronicle.conf`:
 | `Chronicle.UploadSecret` | `AC_CHRONICLE_UPLOAD_SECRET` | `""` | Bearer token for upload auth |
 | `Chronicle.RequireTLS` | - | `0` | Require `https://` for uploads/pings; keep `0` for plain-HTTP dev environments |
 | `Chronicle.VerifyTLS` | - | `1` | Verify peer certs and hostnames for HTTPS uploads |
+| `Chronicle.TrackDungeonRuns` | - | `1` | Track non-raid dungeon runs; raids still log when Chronicle is enabled |
 | `Chronicle.IdleCloseSeconds` | - | `0` | Idle threshold in seconds before Chronicle closes/segments the current file |
 | `Chronicle.RotateOnIdle` | - | `0` | Start a fresh log segment after an idle timeout on the next write |
-| `Chronicle.UploadSnapshots` | - | `1` | Enable temporary active-log snapshot uploads |
-| `Chronicle.SnapshotOnEncounterCredit` | - | `1` | Upload a snapshot when encounter credit fires |
+| `Chronicle.UploadSnapshots` | - | `0` | Enable temporary active-log snapshot uploads; these overlap final uploads unless ingestion handles snapshots separately |
+| `Chronicle.SnapshotOnEncounterCredit` | - | `0` | Upload a snapshot when encounter credit fires |
 
 When both `UploadURL` and `UploadSecret` are set, log files are gzipped,
 uploaded to Chronicle when an instance closes, and deleted on success.

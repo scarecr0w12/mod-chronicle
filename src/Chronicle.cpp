@@ -24,6 +24,20 @@
 #include "World.h"
 #include "DBCStores.h"
 
+#if __has_include("mythic_plus.h")
+#include "mythic_plus.h"
+#define MOD_CHRONICLE_HAS_MYTHIC_PLUS 1
+#else
+#define MOD_CHRONICLE_HAS_MYTHIC_PLUS 0
+#endif
+
+#if __has_include("DungeonMasterMgr.h")
+#include "DungeonMasterMgr.h"
+#define MOD_CHRONICLE_HAS_DUNGEON_MASTER 1
+#else
+#define MOD_CHRONICLE_HAS_DUNGEON_MASTER 0
+#endif
+
 #include <zlib.h>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -282,14 +296,16 @@ std::string EventFormatter::Header(std::string const& realmName)
 // CHRONICLE_ZONE_INFO — emitted once per instance.
 // ---------------------------------------------------------------------------
 std::string EventFormatter::ZoneInfo(std::string const& zoneName, uint32 mapId,
-                                     uint32 instanceId, std::string const& instanceType)
+                                     uint32 instanceId, std::string const& instanceType,
+                                     std::string const& runType)
 {
     std::ostringstream ss;
     ss << Now() << "  CHRONICLE_ZONE_INFO"
        << ",\"" << zoneName << "\""
        << "," << mapId
        << "," << instanceId
-       << ",\"" << instanceType << "\"";
+       << ",\"" << instanceType << "\""
+       << ",\"" << runType << "\"";
     return ss.str();
 }
 
@@ -1203,7 +1219,6 @@ bool CombatLogWriter::IsIdleFor(std::chrono::seconds idleTimeout) const
 
 namespace
 {
-constexpr uint32 MaxBackgroundTasks = 32;
 constexpr auto ShutdownTaskWaitTimeout = std::chrono::seconds(45);
 }
 
@@ -1221,10 +1236,11 @@ void InstanceTracker::LoadConfig()
     _uploadSecret = sConfigMgr->GetOption<std::string>("Chronicle.UploadSecret", "");
     _requireTls = sConfigMgr->GetOption<bool>("Chronicle.RequireTLS", false);
     _verifyTls = sConfigMgr->GetOption<bool>("Chronicle.VerifyTLS", true);
+    _trackDungeonRuns = sConfigMgr->GetOption<bool>("Chronicle.TrackDungeonRuns", true);
     _idleCloseSeconds = sConfigMgr->GetOption<uint32>("Chronicle.IdleCloseSeconds", 0);
     _rotateOnIdle = sConfigMgr->GetOption<bool>("Chronicle.RotateOnIdle", false);
-    _uploadSnapshots = sConfigMgr->GetOption<bool>("Chronicle.UploadSnapshots", true);
-    _snapshotOnEncounterCredit = sConfigMgr->GetOption<bool>("Chronicle.SnapshotOnEncounterCredit", true);
+    _uploadSnapshots = sConfigMgr->GetOption<bool>("Chronicle.UploadSnapshots", false);
+    _snapshotOnEncounterCredit = sConfigMgr->GetOption<bool>("Chronicle.SnapshotOnEncounterCredit", false);
 
     if (!_uploadURL.empty())
     {
@@ -1241,27 +1257,77 @@ void InstanceTracker::LoadConfig()
     if (_snapshotOnEncounterCredit && !_uploadSnapshots)
         LOG_WARN("module", "Chronicle: Chronicle.SnapshotOnEncounterCredit is enabled, but Chronicle.UploadSnapshots is disabled; encounter-credit snapshots will not run");
 
-    LOG_INFO("module", "Chronicle: enabled={}, logDir={}, upload={}, requireTls={}, verifyTls={}, idleCloseSeconds={}, rotateOnIdle={}, uploadSnapshots={}, snapshotOnEncounterCredit={}",
+    if (_uploadSnapshots && !_uploadURL.empty() && !_uploadSecret.empty())
+        LOG_WARN("module", "Chronicle: snapshot uploads contain overlapping copies of the active log and may duplicate later finalized uploads unless the ingestion endpoint handles snapshots separately");
+
+    LOG_INFO("module", "Chronicle: enabled={}, logDir={}, upload={}, requireTls={}, verifyTls={}, trackDungeonRuns={}, idleCloseSeconds={}, rotateOnIdle={}, uploadSnapshots={}, snapshotOnEncounterCredit={}",
              _enabled, _logDir, _uploadURL.empty() ? "disabled" : _uploadURL,
-             _requireTls, _verifyTls, _idleCloseSeconds, _rotateOnIdle, _uploadSnapshots, _snapshotOnEncounterCredit);
+             _requireTls, _verifyTls, _trackDungeonRuns, _idleCloseSeconds, _rotateOnIdle, _uploadSnapshots, _snapshotOnEncounterCredit);
+}
+
+bool InstanceTracker::ShouldTrackMap(Map const* map) const
+{
+    if (!map || !map->IsDungeon())
+        return false;
+
+    if (!_trackDungeonRuns && !map->IsRaid())
+        return false;
+
+    return true;
+}
+
+namespace
+{
+std::string DetermineChronicleRunType(Map* map)
+{
+    if (!map)
+        return "NORMAL";
+
+#if MOD_CHRONICLE_HAS_MYTHIC_PLUS
+    if (sMythicPlus && sMythicPlus->IsEnabled() && sMythicPlus->IsMapInMythicPlus(map))
+        return "MYTHIC_PLUS";
+#endif
+
+#if MOD_CHRONICLE_HAS_DUNGEON_MASTER
+    if (sDungeonMasterMgr && sDungeonMasterMgr->HasActiveSessionForInstance(map->GetInstanceId()))
+        return "DUNGEON_MASTER";
+#endif
+
+    return "NORMAL";
+}
 }
 
 void InstanceTracker::Shutdown()
 {
-    {
-        std::lock_guard<std::mutex> taskLock(_taskMutex);
-        _shuttingDown = true;
-    }
+    std::vector<BackgroundTask> pendingUploads;
 
+    bool uploadsConfigured = !_uploadURL.empty() && !_uploadSecret.empty();
     {
         std::lock_guard<std::mutex> lock(_mutex);
         for (auto& [instanceId, writer] : _writers)
         {
-            (void)instanceId;
             if (writer)
             {
                 writer->Flush();
                 writer->Close();
+
+                if (uploadsConfigured)
+                {
+                    BackgroundTask task;
+                    task.type = BackgroundTaskType::Upload;
+                    task.path = writer->GetPath();
+                    task.url = _uploadURL;
+                    task.secret = _uploadSecret;
+                    task.instanceId = writer->GetInstanceId();
+                    task.mapName = writer->GetMapName();
+                    task.realmName = writer->GetRealmName();
+                    auto tokenIt = _instanceTokens.find(instanceId);
+                    if (tokenIt != _instanceTokens.end())
+                        task.instanceToken = tokenIt->second;
+                    task.requireTls = _requireTls;
+                    task.verifyTls = _verifyTls;
+                    pendingUploads.push_back(std::move(task));
+                }
             }
         }
 
@@ -1271,52 +1337,108 @@ void InstanceTracker::Shutdown()
         _instanceTokens.clear();
     }
 
-    std::unique_lock<std::mutex> lock(_taskMutex);
-    if (!_taskCv.wait_for(lock, ShutdownTaskWaitTimeout, [this]() { return _activeBackgroundTasks == 0; }))
-        LOG_WARN("module", "Chronicle: shutdown timed out waiting for {} background upload task(s); remaining files will be retried on next startup", _activeBackgroundTasks);
-}
-
-void InstanceTracker::QueueUploadTask(std::string path, uint32 instanceId,
-                                      std::string mapName, std::string realmName,
-                                      std::string instanceToken)
-{
-    std::string uploadUrl = _uploadURL;
-    std::string uploadSecret = _uploadSecret;
-    bool requireTls = _requireTls;
-    bool verifyTls = _verifyTls;
-
     {
-        std::lock_guard<std::mutex> lock(_taskMutex);
-        if (_shuttingDown)
-        {
-            LOG_WARN("module", "Chronicle: skipping background upload for {} during shutdown; file remains on disk for orphan sweep retry", path);
-            return;
-        }
+        std::lock_guard<std::mutex> taskLock(_taskMutex);
+        _shuttingDown = true;
+        for (BackgroundTask& task : pendingUploads)
+            _taskQueue.emplace_back(std::move(task));
 
-        if (_activeBackgroundTasks >= MaxBackgroundTasks)
-        {
-            LOG_WARN("module", "Chronicle: skipping background upload for {} because {} task(s) are already in flight; file remains on disk for retry", path, _activeBackgroundTasks);
-            return;
-        }
-
-        ++_activeBackgroundTasks;
+        if (!_taskQueue.empty())
+            EnsureTaskWorkerStartedLocked();
     }
 
-    std::thread([this,
-        uploadUrl = std::move(uploadUrl), uploadSecret = std::move(uploadSecret),
-        path = std::move(path), instanceId,
-        mapName = std::move(mapName), realmName = std::move(realmName),
-        instanceToken = std::move(instanceToken), requireTls, verifyTls]() mutable
+    _taskCv.notify_all();
+
+    std::unique_lock<std::mutex> lock(_taskMutex);
+    if (!_taskCv.wait_for(lock, ShutdownTaskWaitTimeout, [this]() { return _taskQueue.empty() && _activeBackgroundTasks == 0; }))
+        LOG_WARN("module", "Chronicle: shutdown timed out waiting for {} queued / active background task(s); remaining files will be retried on next startup", static_cast<uint32>(_taskQueue.size()) + _activeBackgroundTasks);
+
+    lock.unlock();
+
+    if (_taskWorker.joinable())
+        _taskWorker.join();
+}
+
+void InstanceTracker::EnsureTaskWorkerStartedLocked()
+{
+    if (_taskWorker.joinable())
+        return;
+
+    _taskWorker = std::thread([this]() { RunTaskWorker(); });
+}
+
+void InstanceTracker::EnqueueUploadTaskLocked(std::string path, std::string url,
+                                              std::string secret, uint32 instanceId,
+                                              std::string mapName, std::string realmName,
+                                              std::string instanceToken, bool requireTls,
+                                              bool verifyTls)
+{
+    BackgroundTask task;
+    task.type = BackgroundTaskType::Upload;
+    task.path = std::move(path);
+    task.url = std::move(url);
+    task.secret = std::move(secret);
+    task.instanceId = instanceId;
+    task.mapName = std::move(mapName);
+    task.realmName = std::move(realmName);
+    task.instanceToken = std::move(instanceToken);
+    task.requireTls = requireTls;
+    task.verifyTls = verifyTls;
+    _taskQueue.emplace_back(std::move(task));
+    EnsureTaskWorkerStartedLocked();
+}
+
+void InstanceTracker::EnqueuePingTaskLocked(std::string url, std::string secret,
+                                            bool requireTls, bool verifyTls)
+{
+    BackgroundTask task;
+    task.type = BackgroundTaskType::Ping;
+    task.url = std::move(url);
+    task.secret = std::move(secret);
+    task.requireTls = requireTls;
+    task.verifyTls = verifyTls;
+    _taskQueue.emplace_back(std::move(task));
+    EnsureTaskWorkerStartedLocked();
+}
+
+void InstanceTracker::RunTaskWorker()
+{
+    for (;;)
     {
+        BackgroundTask task;
+        {
+            std::unique_lock<std::mutex> lock(_taskMutex);
+            _taskCv.wait(lock, [this]() { return _shuttingDown || !_taskQueue.empty(); });
+
+            if (_taskQueue.empty())
+            {
+                if (_shuttingDown)
+                    break;
+
+                continue;
+            }
+
+            task = std::move(_taskQueue.front());
+            _taskQueue.pop_front();
+            ++_activeBackgroundTasks;
+        }
+
         try
         {
-            UploadAndDelete(std::move(path), std::move(uploadUrl), std::move(uploadSecret),
-                            instanceId, std::move(mapName), std::move(realmName),
-                            std::move(instanceToken), requireTls, verifyTls);
+            if (task.type == BackgroundTaskType::Upload)
+            {
+                UploadAndDelete(std::move(task.path), std::move(task.url), std::move(task.secret),
+                                task.instanceId, std::move(task.mapName), std::move(task.realmName),
+                                std::move(task.instanceToken), task.requireTls, task.verifyTls);
+            }
+            else
+            {
+                PingRemote(std::move(task.url), std::move(task.secret), task.requireTls, task.verifyTls);
+            }
         }
         catch (std::exception const& e)
         {
-            LOG_ERROR("module", "Chronicle: unexpected background upload exception: {}", e.what());
+            LOG_ERROR("module", "Chronicle: unexpected background task exception: {}", e.what());
         }
 
         {
@@ -1326,7 +1448,24 @@ void InstanceTracker::QueueUploadTask(std::string path, uint32 instanceId,
         }
 
         _taskCv.notify_all();
-    }).detach();
+    }
+}
+
+void InstanceTracker::QueueUploadTask(std::string path, uint32 instanceId,
+                                      std::string mapName, std::string realmName,
+                                      std::string instanceToken)
+{
+    std::lock_guard<std::mutex> lock(_taskMutex);
+    if (_shuttingDown)
+    {
+        LOG_WARN("module", "Chronicle: skipping background upload for {} during shutdown; file remains on disk for orphan sweep retry", path);
+        return;
+    }
+
+    EnqueueUploadTaskLocked(std::move(path), _uploadURL, _uploadSecret, instanceId,
+                            std::move(mapName), std::move(realmName), std::move(instanceToken),
+                            _requireTls, _verifyTls);
+    _taskCv.notify_all();
 }
 
 void InstanceTracker::QueuePingTask(std::string url, std::string secret)
@@ -1339,34 +1478,10 @@ void InstanceTracker::QueuePingTask(std::string url, std::string secret)
         if (_shuttingDown)
             return;
 
-        if (_activeBackgroundTasks >= MaxBackgroundTasks)
-        {
-            LOG_WARN("module", "Chronicle: skipping startup ping because {} background task(s) are already in flight", _activeBackgroundTasks);
-            return;
-        }
-
-        ++_activeBackgroundTasks;
+        EnqueuePingTaskLocked(std::move(url), std::move(secret), requireTls, verifyTls);
     }
 
-    std::thread([this, url = std::move(url), secret = std::move(secret), requireTls, verifyTls]() mutable
-    {
-        try
-        {
-            PingRemote(std::move(url), std::move(secret), requireTls, verifyTls);
-        }
-        catch (std::exception const& e)
-        {
-            LOG_ERROR("module", "Chronicle: unexpected background ping exception: {}", e.what());
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(_taskMutex);
-            if (_activeBackgroundTasks > 0)
-                --_activeBackgroundTasks;
-        }
-
-        _taskCv.notify_all();
-    }).detach();
+    _taskCv.notify_all();
 }
 
 void InstanceTracker::UploadOrphanedLogs()
@@ -1454,7 +1569,8 @@ void InstanceTracker::EmitWriterPreamble(CombatLogWriter& writer, Map* map)
     uint32 instanceId = map->GetInstanceId();
     writer.WriteLine(EventFormatter::Header(writer.GetRealmName()));
     std::string instanceType = map->IsRaid() ? "raid" : "party";
-    writer.WriteLine(EventFormatter::ZoneInfo(map->GetMapName(), map->GetId(), instanceId, instanceType));
+    writer.WriteLine(EventFormatter::ZoneInfo(map->GetMapName(), map->GetId(), instanceId,
+                                              instanceType, DetermineChronicleRunType(map)));
 
     for (MapReference const& ref : map->GetPlayers())
         EmitCombatantInfoIfNeeded(writer, ref.GetSource(), instanceId);
@@ -1479,7 +1595,7 @@ void InstanceTracker::FinalizeWriterForIdleRotation(uint32 instanceId, std::uniq
 
 CombatLogWriter* InstanceTracker::GetOrCreateWriter(Map* map)
 {
-    if (!map || !map->IsDungeon())
+    if (!ShouldTrackMap(map))
         return nullptr;
 
     uint32 instanceId = map->GetInstanceId();
@@ -1538,7 +1654,7 @@ CombatLogWriter* InstanceTracker::GetOrCreateWriter(Map* map)
 
 void InstanceTracker::OnPlayerEnterInstance(Map* map, Player* player)
 {
-    if (!_enabled || !map || !map->IsDungeon())
+    if (!_enabled || !ShouldTrackMap(map))
         return;
 
     std::lock_guard<std::mutex> lock(_mutex);
@@ -1553,7 +1669,7 @@ void InstanceTracker::OnPlayerEnterInstance(Map* map, Player* player)
 
 void InstanceTracker::OnPlayerLeaveInstance(Map* map, Player* /*player*/)
 {
-    if (!_enabled || !map || !map->IsDungeon())
+    if (!_enabled || !ShouldTrackMap(map))
         return;
 }
 
@@ -1825,8 +1941,20 @@ void InstanceTracker::UploadAndDelete(std::string path,
         int status = DoSend(parsed, req, verifyTls);
         if (status == 201)
         {
-            std::filesystem::remove(path);
-            LOG_INFO("module", "Chronicle: uploaded and deleted {}", path);
+            std::error_code ec;
+            bool removed = std::filesystem::remove(path, ec);
+            if (ec)
+            {
+                LOG_ERROR("module", "Chronicle: uploaded {} but failed to delete it: {}", path, ec.message());
+            }
+            else if (!removed)
+            {
+                LOG_WARN("module", "Chronicle: uploaded {} but it was already missing during delete", path);
+            }
+            else
+            {
+                LOG_INFO("module", "Chronicle: uploaded and deleted {}", path);
+            }
         }
         else
         {
@@ -1879,7 +2007,7 @@ void InstanceTracker::EnsureUnitInfo(Unit* unit)
         return;
 
     Map* map = unit->FindMap();
-    if (!map || !map->IsDungeon())
+    if (!ShouldTrackMap(map))
         return;
 
     std::lock_guard<std::mutex> lock(_mutex);
@@ -1905,7 +2033,7 @@ void InstanceTracker::WriteForUnit(Unit* unit, std::string const& line)
         return;
 
     Map* map = unit->FindMap();
-    if (!map || !map->IsDungeon())
+    if (!ShouldTrackMap(map))
         return;
 
     std::lock_guard<std::mutex> lock(_mutex);
@@ -1919,7 +2047,7 @@ void InstanceTracker::WriteForUnit(Unit* unit, std::string const& line)
 
 void InstanceTracker::WriteForMap(Map* map, std::string const& line)
 {
-    if (!_enabled || !map || !map->IsDungeon())
+    if (!_enabled || !ShouldTrackMap(map))
         return;
 
     std::lock_guard<std::mutex> lock(_mutex);
@@ -1951,7 +2079,7 @@ void InstanceTracker::FlushInstance(uint32 instanceId)
 
 void InstanceTracker::FlushMap(Map* map)
 {
-    if (!_enabled || !map || !map->IsDungeon())
+    if (!_enabled || !ShouldTrackMap(map))
         return;
 
     std::lock_guard<std::mutex> lock(_mutex);
@@ -1966,6 +2094,7 @@ void InstanceTracker::UploadInstanceSnapshot(uint32 instanceId)
         return;
 
     std::string srcPath;
+    uint64 snapshotId = 0;
     uint32 instId = 0;
     std::string mapName;
     std::string realmName;
@@ -1982,13 +2111,14 @@ void InstanceTracker::UploadInstanceSnapshot(uint32 instanceId)
         mapName   = it->second->GetMapName();
         realmName = it->second->GetRealmName();
         token     = GetInstanceToken(instanceId);
+        snapshotId = ++_nextSnapshotId;
     }
 
-    // Copy the log to a temporary file so the original stays open.
-    std::string snapPath = srcPath + ".snap";
+    // Copy the log to a unique temporary file so each queued upload references
+    // immutable bytes, even if multiple snapshots are triggered quickly.
+    std::string snapPath = srcPath + "." + std::to_string(snapshotId) + ".snap";
     std::error_code ec;
-    std::filesystem::copy_file(srcPath, snapPath,
-                               std::filesystem::copy_options::overwrite_existing, ec);
+    std::filesystem::copy_file(srcPath, snapPath, std::filesystem::copy_options::none, ec);
     if (ec)
     {
         LOG_ERROR("module", "Chronicle: snapshot copy failed for {}: {}", srcPath, ec.message());
@@ -2001,7 +2131,7 @@ void InstanceTracker::UploadInstanceSnapshot(uint32 instanceId)
 
 void InstanceTracker::UploadInstanceSnapshot(Map* map)
 {
-    if (!map || !map->IsDungeon())
+    if (!ShouldTrackMap(map))
         return;
 
     {
