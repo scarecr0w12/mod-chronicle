@@ -8,6 +8,8 @@
 
 #include "Chronicle.h"
 
+#include "AllCreatureScript.h"
+#include "Creature.h"
 #include "Log.h"
 #include "Map.h"
 #include "ObjectAccessor.h"
@@ -526,10 +528,11 @@ public:
     void OnSpellInterrupt(Unit* interrupter, Unit* interrupted,
         uint32 interruptSpellId, uint32 interruptedSpellId) override
     {
-        if (!interrupter || !interrupted || !InstanceTracker::Instance().IsEnabled())
+        if (!interrupted || !InstanceTracker::Instance().IsEnabled())
             return;
 
-        InstanceTracker::Instance().EnsureUnitInfo(interrupter);
+        if (interrupter)
+            InstanceTracker::Instance().EnsureUnitInfo(interrupter);
         InstanceTracker::Instance().EnsureUnitInfo(interrupted);
 
         InstanceTracker::Instance().WriteForUnit(
@@ -554,6 +557,25 @@ public:
     void OnInstanceIdRemoved(uint32 instanceId) override
     {
         InstanceTracker::Instance().OnInstanceIdRemoved(instanceId);
+    }
+};
+
+// ===========================================================================
+// AllCreatureScript — captures alive despawns that do not produce UNIT_DIED.
+// ===========================================================================
+class ChronicleAllCreatureScript : public AllCreatureScript
+{
+public:
+    ChronicleAllCreatureScript() : AllCreatureScript("ChronicleAllCreatureScript") { }
+
+    void OnBeforeCreatureDespawn(Creature* creature) override
+    {
+        if (!creature || !creature->IsAlive() || !InstanceTracker::Instance().IsEnabled())
+            return;
+
+        InstanceTracker::Instance().EnsureUnitInfo(creature);
+        InstanceTracker::Instance().WriteForUnit(
+            creature, EventFormatter::UnitDespawn(creature));
     }
 };
 
@@ -707,6 +729,7 @@ void AddChronicleScripts()
 {
     new ChronicleUnitScript();
     new ChronicleGlobalScript();
+    new ChronicleAllCreatureScript();
     new ChroniclePlayerScript();
     new ChronicleLootScript();
     new ChronicleAllMapScript();

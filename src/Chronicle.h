@@ -35,6 +35,7 @@
 class Aura;
 class AuraApplication;
 class AuraEffect;
+class Creature;
 class DamageInfo;
 class HealInfo;
 class Item;
@@ -86,6 +87,7 @@ public:
     static std::string UnitInfo(Unit* unit);
     static std::string UnitEvade(Unit* unit, uint8 evadeReason);
     static std::string UnitCombat(Unit* unit, Unit* victim);
+    static std::string UnitDespawn(Creature* creature);
 
     // --- Standard WotLK combat events ---
 

@@ -8,8 +8,10 @@ Every dungeon/raid instance gets its own log file. Events are written in
 real-time as combat happens, producing files that can be uploaded directly to
 Chronicle for analysis.
 
-> **Requires custom ScriptMgr hooks.** This module depends on 17 hooks added to
-> the AzerothCore core that are not in mainline. See
+> **Requires custom core hooks.** This module depends on 18 non-mainline hook
+> additions currently represented by AzerothCore PR
+> [#25641](https://github.com/azerothcore/azerothcore-wotlk/pull/25641)
+> (or equivalent local cherry-picks). See
 > [Custom Hooks](#custom-scriptmgr-hooks) below.
 
 ## Events Captured
@@ -31,7 +33,7 @@ These follow the standard WotLK combat log format: `<unix_millis>  EVENT_TYPE,pa
 | `SPELL_PERIODIC_DRAIN` | `OnSendPeriodicAuraLog` | Periodic mana/resource drain |
 | `SPELL_PERIODIC_ENERGIZE` | `OnSendPeriodicAuraLog` | Periodic resource gain |
 | `DAMAGE_SHIELD` | `OnDealDamageShieldDamage` | Thorns/retribution aura damage |
-| `SPELL_ABSORBED` | `OnDamageAbsorbed` | Per-aura absorb (PW:S, Mana Shield, etc.) with spell attribution |
+| `SPELL_ABSORBED` | `OnSchoolAbsorbApplied` | Per-aura school-absorb or mana-shield attribution (PW:S, Mana Shield, etc.) |
 | `SPELL_AURA_APPLIED` | `OnAuraApplicationClientUpdate` | Buff/debuff applied |
 | `SPELL_AURA_REMOVED` | `OnAuraApplicationClientUpdate` | Buff/debuff removed |
 | `SPELL_SUMMON` | `OnSpellExecuteLogSummonObject` | Unit summoned a creature or game object (pet, totem, trap, etc.) |
@@ -39,8 +41,8 @@ These follow the standard WotLK combat log format: `<unix_millis>  EVENT_TYPE,pa
 | `SPELL_DISPEL` | `OnSpellDispel` | Successful dispel with removed aura spell and aura type |
 | `SPELL_STOLEN` | `OnSpellDispel` | Successful spell steal with removed aura spell |
 | `UNIT_DIED` | `OnUnitDeath` | Unit death |
-| `SPELL_INTERRUPT` | `OnSpellInterrupt` | Spell interrupt (Kick, Counterspell, Pummel, silence-based lockouts) with both spell IDs |
-| `ENVIRONMENTAL_DAMAGE` | `OnEnvironmentalDamage` | Lava, drowning, falling, fatigue damage |
+| `SPELL_INTERRUPT` | `OnSpellInterrupt` | Spell interrupt (Kick, Counterspell, Pummel, silence-based lockouts) with both spell IDs; the interrupter may be empty for silence auras whose caster left the world |
+| `ENVIRONMENTAL_DAMAGE` | `OnEnvironmentalDamage` | Lava, drowning, falling, fatigue damage using the raw pre-mitigation amount from `Player::EnvironmentalDamage()` |
 
 ### Chronicle Extension Events
 
@@ -55,6 +57,7 @@ the standard combat log.
 | `CHRONICLE_UNIT_INFO` | Unit metadata, emitted first time a GUID appears in combat (guid, name, level, flags, owner, max health, affiliation, boss marker) |
 | `CHRONICLE_UNIT_EVADE` | Creature entered evade mode |
 | `CHRONICLE_UNIT_COMBAT` | Unit entered combat with a target |
+| `CHRONICLE_UNIT_DESPAWN` | Creature despawned alive without producing `UNIT_DIED` |
 | `CHRONICLE_LOOT_ITEM` | Item looted, including loot source type, item entry, item name, and count |
 | `CHRONICLE_LOOT_MONEY` | Money looted, including loot source type and copper amount |
 | `CHRONICLE_SPELL_TARGET_RESULT` | Per-target hit/miss/reflect result captured from `Spell::m_UniqueTargetInfo` at `SPELL_GO` time |
@@ -97,10 +100,10 @@ tree. AC's CMake auto-discovers any subdirectory containing `.cpp` files.
 
 ### 2. Apply Custom Hooks
 
-This module requires 17 custom ScriptMgr hooks patched into the AzerothCore
-core. Apply the patch from
-[Emyrk/azerothcore-wotlk#2](https://github.com/Emyrk/azerothcore-wotlk/pull/2)
-to your AzerothCore source tree before building.
+This module requires the non-mainline hook surface currently carried by
+AzerothCore PR
+[#25641](https://github.com/azerothcore/azerothcore-wotlk/pull/25641)
+or an equivalent local cherry-pick set in your core before building.
 
 See [Custom ScriptMgr Hooks](#custom-scriptmgr-hooks) for the full list.
 
@@ -156,7 +159,8 @@ tail -f ./env/dist/logs/chronicle_logs/instance_*.log
 
 ## Custom ScriptMgr Hooks
 
-This module requires 16 hooks added to the AzerothCore core. These are
+This module currently relies on 18 non-mainline hooks in the AzerothCore core.
+These are
 **read-only observer hooks** inserted at the server's packet-send points — they
 have zero gameplay impact.
 
@@ -164,8 +168,8 @@ have zero gameplay impact.
 
 | Hook | Inserted At | Data |
 |------|------------|------|
-| `OnSendAttackStateUpdate(CalcDamageInfo*, int32)` | `Unit::SendAttackStateUpdate()` | Full melee hit/miss with all mitigation |
-| `OnSendSpellNonMeleeDamageLog(SpellNonMeleeDamage*, int32)` | `Unit::SendSpellNonMeleeDamageLog()` | Full spell damage with all mitigation |
+| `OnSendAttackStateUpdate(CalcDamageInfo const*, int32)` | `Unit::SendAttackStateUpdate()` | Full melee hit/miss with all mitigation |
+| `OnSendSpellNonMeleeDamageLog(SpellNonMeleeDamage const*, int32)` | `Unit::SendSpellNonMeleeDamageLog()` | Full spell damage with all mitigation |
 | `OnSendHealSpellLog(HealInfo const&, bool)` | `Unit::SendHealSpellLog()` | Heal amount, overheal, absorb, crit |
 | `OnSendSpellMiss(Unit*, Unit*, uint32, SpellMissInfo)` | `Unit::SendSpellMiss()` | Spell miss with miss type |
 | `OnSendSpellDamageImmune(Unit*, Unit*, uint32)` | `Unit::SendSpellDamageImmune()` | Spell immunity |
@@ -173,8 +177,8 @@ have zero gameplay impact.
 | `OnSendSpellNonMeleeReflectLog(SpellNonMeleeDamage*, Unit*)` | `Unit::SendSpellNonMeleeReflectLog()` | Spell reflect |
 | `OnSendEnergizeSpellLog(Unit*, Unit*, uint32, uint32, Powers)` | `Unit::SendEnergizeSpellLog()` | Mana/rage/energy gain |
 | `OnSendPeriodicAuraLog(Unit*, SpellPeriodicAuraLogInfo*)` | `Unit::SendPeriodicAuraLog()` | Periodic tick (DoT/HoT/energize) |
-| `OnDealDamageShieldDamage(DamageInfo*, uint32)` | `Unit::DealDamageShieldDamage()` | Damage shield (thorns) |
-| `OnDamageAbsorbed(DamageInfo&, SpellInfo const*, Unit*, uint32)` | `Unit::CalcAbsorbResist()` | Per-aura absorb attribution |
+| `OnDealDamageShieldDamage(Unit*, Unit*, SpellInfo const*, uint32, uint32, uint32)` | `Unit::DealDamageShieldDamage()` | Damage shield (thorns) with post-mitigation damage/absorb/overkill |
+| `OnSchoolAbsorbApplied(DamageInfo&, SpellInfo const*, Unit*, uint32)` | `Unit::CalcAbsorbResist()` | Per-aura school-absorb or mana-shield attribution |
 
 ### GlobalScript (5 custom hooks + 3 mainline hooks)
 
@@ -183,7 +187,7 @@ have zero gameplay impact.
 | `OnSpellSendSpellGo(Spell*)` | `Spell::SendSpellGo()` | Spell cast success at `SPELL_GO` packet |
 | `OnSpellExecuteLogSummonObject(Spell*, WorldObject*)` | `Spell::ExecuteLogEffectSummonObject()` | Summon with caster spell + summoned object |
 | `OnAuraApplicationClientUpdate(Unit*, Aura*, bool)` | `AuraApplication::ClientUpdate()` | Aura applied/removed at client notification |
-| `OnSpellInterrupt(Unit*, Unit*, uint32, uint32)` | `Spell::EffectInterruptCast()`, `AuraEffect::HandleAuraModSilence()` | Spell interrupt with interrupter + interrupted spell IDs |
+| `OnSpellInterrupt(Unit*, Unit*, uint32, uint32)` | `Spell::EffectInterruptCast()`, `AuraEffect::HandleAuraModSilence()` | Spell interrupt with interrupter + interrupted spell IDs; interrupter may be `nullptr` for some silence-aura interrupts |
 | `OnSpellDispel(Unit*, Unit*, uint32, uint32, bool)` | `Spell::EffectDispel()`, `Spell::EffectStealBeneficialBuff()` | Successful dispel or steal with removed aura spell id |
 | `OnInstanceIdRemoved(uint32)` *(mainline)* | `InstanceSaveMgr::DeleteInstanceSaveIfNeeded()` | Safety-net cleanup when an instance save is deleted |
 | `OnBeforeSetBossState(...)` *(mainline)* | `InstanceScript::SetBossState()` | Boss encounter state transition (pull/kill/wipe) |
@@ -194,6 +198,12 @@ have zero gameplay impact.
 | Hook | Inserted At | Data |
 |------|------------|------|
 | `OnEnvironmentalDamage(Player*, EnviromentalDamage, uint32)` | `Player::EnvironmentalDamage()` | Environmental damage (lava, drowning, fall) |
+
+### AllCreatureScript (1 hook)
+
+| Hook | Inserted At | Data |
+|------|------------|------|
+| `OnBeforeCreatureDespawn(Creature*)` | `Creature::DespawnOrUnsummon()` | Alive despawns that would otherwise disappear without `UNIT_DIED` |
 
 
 ## Future Work

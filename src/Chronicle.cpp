@@ -478,6 +478,20 @@ std::string EventFormatter::UnitCombat(Unit* unit, Unit* victim)
     return ss.str();
 }
 
+// ---------------------------------------------------------------------------
+// CHRONICLE_UNIT_DESPAWN — emitted when a creature despawns alive without a
+// UNIT_DIED event (e.g. scripted vanish/unsummon/forced despawn).
+// Fields: guid, "name"
+// ---------------------------------------------------------------------------
+std::string EventFormatter::UnitDespawn(Creature* creature)
+{
+    std::ostringstream ss;
+    ss << Now() << "  CHRONICLE_UNIT_DESPAWN"
+       << "," << Guid(creature->GetGUID())
+       << ",\"" << creature->GetName() << "\"";
+    return ss.str();
+}
+
 // ===== Standard WotLK Combat Events =====
 
 // Helper: map MeleeHitOutcome to miss-type string.

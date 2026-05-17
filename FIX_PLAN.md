@@ -12,6 +12,13 @@ Harden `mod-chronicle` from a strong proof-of-concept into a production-ready Az
 
 ## Progress update
 
+### Completed on 2026-05-17
+
+- AzerothCore PR `#25641` alignment refresh completed:
+  - [x] Update Chronicle to accept nullable `OnSpellInterrupt` sources from silence-aura paths
+  - [x] Add `OnBeforeCreatureDespawn` coverage for alive despawns via `CHRONICLE_UNIT_DESPAWN`
+  - [x] Refresh hook documentation to match final upstream hook names and signatures
+
 ### Completed on 2026-04-27
 
 - Sprint 1 code work completed:

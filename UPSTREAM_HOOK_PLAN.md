@@ -30,8 +30,8 @@ Scope:
 
 ### Custom UnitScript hooks
 
-- `OnSendAttackStateUpdate(CalcDamageInfo*, int32)`
-- `OnSendSpellNonMeleeDamageLog(SpellNonMeleeDamage*, int32)`
+- `OnSendAttackStateUpdate(CalcDamageInfo const*, int32)`
+- `OnSendSpellNonMeleeDamageLog(SpellNonMeleeDamage const*, int32)`
 - `OnSendHealSpellLog(HealInfo const&, bool)`
 - `OnSendSpellMiss(Unit*, Unit*, uint32, SpellMissInfo)`
 - `OnSendSpellDamageImmune(Unit*, Unit*, uint32)`
@@ -39,8 +39,8 @@ Scope:
 - `OnSendSpellNonMeleeReflectLog(SpellNonMeleeDamage*, Unit*)`
 - `OnSendEnergizeSpellLog(Unit*, Unit*, uint32, uint32, Powers)`
 - `OnSendPeriodicAuraLog(Unit*, SpellPeriodicAuraLogInfo*)`
-- `OnDealDamageShieldDamage(DamageInfo*, uint32)`
-- `OnDamageAbsorbed(DamageInfo&, SpellInfo const*, Unit*, uint32)`
+- `OnDealDamageShieldDamage(Unit*, Unit*, SpellInfo const*, uint32, uint32, uint32)`
+- `OnSchoolAbsorbApplied(DamageInfo&, SpellInfo const*, Unit*, uint32)`
 
 ### Custom GlobalScript hooks
 
@@ -53,6 +53,10 @@ Scope:
 ### Custom PlayerScript hooks
 
 - `OnEnvironmentalDamage(Player*, EnviromentalDamage, uint32)`
+
+### Custom AllCreatureScript hooks
+
+- `OnBeforeCreatureDespawn(Creature*)`
 
 ### Mainline hooks Chronicle already uses
 
@@ -107,6 +111,7 @@ Minimum validation set:
 - interrupt path including silence-based cases
 - dispel/steal success path
 - environmental damage path
+- alive despawn path that does not emit `UNIT_DIED`
 
 ## Deliverables expected alongside a PR
 

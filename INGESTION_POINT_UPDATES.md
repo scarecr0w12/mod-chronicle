@@ -69,6 +69,7 @@ Current additional module output includes:
 4. `CHRONICLE_SPELL_TARGET_RESULT`
 5. `CHRONICLE_LOOT_ITEM`
 6. `CHRONICLE_LOOT_MONEY`
+7. `CHRONICLE_UNIT_DESPAWN`
 
 #### Ingestion work needed
 
@@ -216,6 +217,7 @@ These items should be explicitly checked in Chronicle before treating the ingest
 4. Verify `CHRONICLE_SPELL_TARGET_RESULT` parsing and intended storage behavior.
 5. Verify `CHRONICLE_LOOT_ITEM` parsing and intended storage behavior.
 6. Verify `CHRONICLE_LOOT_MONEY` parsing and intended storage behavior.
+7. Verify `CHRONICLE_UNIT_DESPAWN` parsing and intended storage behavior.
 
 ### Append Behavior Checklist
 
@@ -242,6 +244,7 @@ If this work is done in phases, the best order is:
 4. `CHRONICLE_SPELL_TARGET_RESULT`
 5. `CHRONICLE_LOOT_ITEM`
 6. `CHRONICLE_LOOT_MONEY`
+7. `CHRONICLE_UNIT_DESPAWN`
 
 ### Priority 2: Contract Clarity
 

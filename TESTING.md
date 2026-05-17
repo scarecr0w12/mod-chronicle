@@ -78,6 +78,11 @@ hook, upload, or lifecycle changes.
   - `SPELL_DISPEL` or `SPELL_STOLEN`
   - `SPELL_ABSORBED`
 
+If you can reproduce a silence-aura interrupt where the aura caster despawns or
+leaves the world before the interrupt fires, verify Chronicle still logs
+`SPELL_INTERRUPT` with an empty source GUID/name/flags rather than dropping the
+event.
+
 ### 7. Summon and target-result coverage
 
 - Use a summon spell or summon-capable item.
@@ -106,6 +111,15 @@ hook, upload, or lifecycle changes.
   - `CHRONICLE_ENCOUNTER_START`
   - `CHRONICLE_ENCOUNTER_END`
   - `CHRONICLE_ENCOUNTER_CREDIT`
+
+### 9a. Alive despawn coverage
+
+- Trigger a mechanic that removes a creature without killing it (temporary
+  summons expiring, scripted vanish/despawn, forced despawn cleanup, etc.).
+- Verify Chronicle logs:
+  - `CHRONICLE_UNIT_DESPAWN`
+- Confirm Chronicle does not emit a fake `UNIT_DIED` for that same alive
+  despawn path.
 
 ### 10. Snapshot behavior
 

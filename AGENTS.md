@@ -37,6 +37,8 @@ The module is wired through `src/ChronicleLogs_SC.cpp` and currently uses:
 - `ChronicleGlobalScript`
   - cast success, per-target cast result logging, aura updates, summons,
     encounter state, interrupts, dispels, and instance-save cleanup
+- `ChronicleAllCreatureScript`
+  - alive creature despawns that would otherwise disappear without `UNIT_DIED`
 - `ChroniclePlayerScript`
   - environmental damage and item loot
 - `ChronicleLootScript`
@@ -101,6 +103,7 @@ Implemented Chronicle extensions include:
 - `CHRONICLE_UNIT_INFO`
 - `CHRONICLE_UNIT_EVADE`
 - `CHRONICLE_UNIT_COMBAT`
+- `CHRONICLE_UNIT_DESPAWN`
 - `CHRONICLE_SPELL_TARGET_RESULT`
 - `CHRONICLE_LOOT_ITEM`
 - `CHRONICLE_LOOT_MONEY`
@@ -120,6 +123,9 @@ Implemented standard event families include, among others:
 - `SPELL_DISPEL`, `SPELL_STOLEN`, `SPELL_INTERRUPT`
 - `UNIT_DIED`, `ENVIRONMENTAL_DAMAGE`
 
+`SPELL_INTERRUPT` can legitimately log an empty source GUID/name/flags when the
+interrupt came from a silence aura whose original caster is no longer in world.
+
 ## Remaining engineering gaps
 
 The major repo-local gaps still open are:
@@ -127,8 +133,6 @@ The major repo-local gaps still open are:
 - formatter regression tests do not exist yet
 - owner-chain attribution is still shallow
 - creature spawn identity is still GUID-based rather than stable spawn based
-- upload work is tracked for shutdown safety but still fans out using detached
-  threads instead of a dedicated worker queue/service
 - production secret rotation/externalization is an operational task, not a
   repo-only code change
 
