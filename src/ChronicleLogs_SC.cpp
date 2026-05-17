@@ -41,7 +41,7 @@ public:
         UNITHOOK_ON_SEND_ENERGIZE_SPELL_LOG,
         UNITHOOK_ON_SEND_PERIODIC_AURA_LOG,
         UNITHOOK_ON_DEAL_DAMAGE_SHIELD_DAMAGE,
-        UNITHOOK_ON_DAMAGE_ABSORBED,
+        UNITHOOK_ON_SCHOOL_ABSORB_APPLIED,
         UNITHOOK_ON_UNIT_DEATH,
         UNITHOOK_ON_UNIT_ENTER_EVADE_MODE,
         UNITHOOK_ON_UNIT_ENTER_COMBAT,
@@ -50,7 +50,7 @@ public:
     // -----------------------------------------------------------------------
     // OnSendAttackStateUpdate — melee hit/miss → SWING_DAMAGE or SWING_MISSED
     // -----------------------------------------------------------------------
-    void OnSendAttackStateUpdate(CalcDamageInfo* damageInfo, int32 overkill) override
+    void OnSendAttackStateUpdate(CalcDamageInfo const* damageInfo, int32 overkill) override
     {
         if (!damageInfo || !damageInfo->attacker || !InstanceTracker::Instance().IsEnabled())
             return;
@@ -101,7 +101,7 @@ public:
     // -----------------------------------------------------------------------
     // OnSendSpellNonMeleeDamageLog — spell damage → SPELL_DAMAGE
     // -----------------------------------------------------------------------
-    void OnSendSpellNonMeleeDamageLog(SpellNonMeleeDamage* log,
+    void OnSendSpellNonMeleeDamageLog(SpellNonMeleeDamage const* log,
                                        int32 overkill) override
     {
         if (!log || !log->attacker || !InstanceTracker::Instance().IsEnabled())
@@ -257,20 +257,18 @@ public:
     // -----------------------------------------------------------------------
     // OnDealDamageShieldDamage — damage shield (thorns etc.) → DAMAGE_SHIELD
     // -----------------------------------------------------------------------
-    void OnDealDamageShieldDamage(DamageInfo* damageInfo,
+    void OnDealDamageShieldDamage(Unit* shieldOwner, Unit* attacker,
+        SpellInfo const* spellInfo, uint32 damage, uint32 absorb,
         uint32 overkill) override
     {
-        if (!damageInfo || !InstanceTracker::Instance().IsEnabled())
+        if (!shieldOwner || !InstanceTracker::Instance().IsEnabled())
             return;
 
-        Unit* attacker = damageInfo->GetAttacker();
-        Unit* victim   = damageInfo->GetVictim();
-
+        InstanceTracker::Instance().EnsureUnitInfo(shieldOwner);
         InstanceTracker::Instance().EnsureUnitInfo(attacker);
-        InstanceTracker::Instance().EnsureUnitInfo(victim);
 
         InstanceTracker::Instance().WriteForUnit(
-            victim, EventFormatter::DamageShield(damageInfo, overkill));
+            attacker, EventFormatter::DamageShield(shieldOwner, attacker, spellInfo, damage, absorb, overkill));
     }
 
     // -----------------------------------------------------------------------
@@ -303,9 +301,9 @@ public:
     }
 
     // -----------------------------------------------------------------------
-    // OnDamageAbsorbed — absorb aura soaked damage → SPELL_ABSORBED
+    // OnSchoolAbsorbApplied — absorb aura soaked damage → SPELL_ABSORBED
     // -----------------------------------------------------------------------
-    void OnDamageAbsorbed(DamageInfo& dmgInfo, SpellInfo const* absorbSpellInfo,
+    void OnSchoolAbsorbApplied(DamageInfo& dmgInfo, SpellInfo const* absorbSpellInfo,
                            Unit* absorbCaster, uint32 absorbAmount) override
     {
         if (!absorbSpellInfo || !absorbAmount ||

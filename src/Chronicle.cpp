@@ -601,7 +601,7 @@ static void AppendDamageSuffix(std::ostringstream& ss, uint32 amount,
 // ---------------------------------------------------------------------------
 // SWING_DAMAGE — melee auto-attack hit.
 // ---------------------------------------------------------------------------
-std::string EventFormatter::SwingDamage(CalcDamageInfo* damageInfo,
+std::string EventFormatter::SwingDamage(CalcDamageInfo const* damageInfo,
                                         uint8 slot, int32 overkill)
 {
     Unit* attacker = damageInfo->attacker;
@@ -628,7 +628,7 @@ std::string EventFormatter::SwingDamage(CalcDamageInfo* damageInfo,
 // ---------------------------------------------------------------------------
 // SWING_MISSED — melee auto-attack miss/dodge/parry/etc.
 // ---------------------------------------------------------------------------
-std::string EventFormatter::SwingMissed(CalcDamageInfo* damageInfo)
+std::string EventFormatter::SwingMissed(CalcDamageInfo const* damageInfo)
 {
     std::ostringstream ss;
     ss << Now() << "  SWING_MISSED,"
@@ -642,7 +642,7 @@ std::string EventFormatter::SwingMissed(CalcDamageInfo* damageInfo)
 // ---------------------------------------------------------------------------
 // SPELL_DAMAGE — spell direct damage with absorb/resist/block.
 // ---------------------------------------------------------------------------
-std::string EventFormatter::SpellDamage(SpellNonMeleeDamage* log, int32 overkill)
+std::string EventFormatter::SpellDamage(SpellNonMeleeDamage const* log, int32 overkill)
 {
     bool critical = (log->HitInfo & SPELL_HIT_TYPE_CRIT) != 0;
 
@@ -808,26 +808,20 @@ std::string EventFormatter::SpellPeriodicEnergize(Unit* victim,
 // ---------------------------------------------------------------------------
 // DAMAGE_SHIELD — thorns, retribution aura, etc.
 // ---------------------------------------------------------------------------
-std::string EventFormatter::DamageShield(DamageInfo* damageInfo, uint32 overkill)
+std::string EventFormatter::DamageShield(Unit* shieldOwner, Unit* attacker,
+    SpellInfo const* spell, uint32 damage, uint32 absorb, uint32 overkill)
 {
-    Unit* attacker = damageInfo->GetAttacker();
-    Unit* victim   = damageInfo->GetVictim();
-    SpellInfo const* spell = damageInfo->GetSpellInfo();
-    uint32 amount   = damageInfo->GetDamage();
-    uint32 school   = static_cast<uint32>(damageInfo->GetSchoolMask());
-    uint32 resisted = damageInfo->GetResist();
-    uint32 blocked  = damageInfo->GetBlock();
-    uint32 absorbed = damageInfo->GetAbsorb();
+    uint32 school = spell ? static_cast<uint32>(spell->SchoolMask) : 0;
 
     std::ostringstream ss;
     ss << Now() << "  DAMAGE_SHIELD,"
-       << BaseParams(attacker, victim);
+       << BaseParams(shieldOwner, attacker);
     if (spell)
         AppendSpellPrefix(ss, spell->Id, spell->SpellName[0], spell->SchoolMask);
     else
         AppendSpellPrefix(ss, 0, "", school);
-    AppendDamageSuffix(ss, amount, static_cast<int32>(overkill), school,
-                       resisted, blocked, absorbed, false, false, false);
+    AppendDamageSuffix(ss, damage, static_cast<int32>(overkill), school,
+                       0 /*resist*/, 0 /*block*/, absorb, false, false, false);
     return ss.str();
 }
 

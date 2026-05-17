@@ -92,12 +92,12 @@ public:
     // Melee auto-attack with full outcome data.
     // slot selects the damage sub-index (0 or 1).
     // overkill is the hook-provided value (combined damage vs HP).
-    static std::string SwingDamage(CalcDamageInfo* damageInfo,
+    static std::string SwingDamage(CalcDamageInfo const* damageInfo,
                                    uint8 slot, int32 overkill);
-    static std::string SwingMissed(CalcDamageInfo* damageInfo);
+    static std::string SwingMissed(CalcDamageInfo const* damageInfo);
 
     // Spell damage with absorb/resist/block
-    static std::string SpellDamage(SpellNonMeleeDamage* log, int32 overkill);
+    static std::string SpellDamage(SpellNonMeleeDamage const* log, int32 overkill);
 
     // Spell miss/immune/resist/reflect
     static std::string SpellMissed(Unit* attacker, Unit* victim, uint32 spellId,
@@ -117,7 +117,7 @@ public:
     static std::string SpellPeriodicEnergize(Unit* victim, SpellPeriodicAuraLogInfo* pInfo);
 
     // Damage shield (thorns etc.)
-    static std::string DamageShield(DamageInfo* damageInfo, uint32 overkill);
+    static std::string DamageShield(Unit* shieldOwner, Unit* attacker, SpellInfo const* spell, uint32 damage, uint32 absorb, uint32 overkill);
 
     // Absorb aura soaked damage (PW:S, Mana Shield, etc.)
     static std::string SpellAbsorbed(DamageInfo& dmgInfo,
